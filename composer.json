@@ -1,0 +1,16 @@
+{
+    "name": "scadaniel/coolguard-cloud",
+    "description": "Backend y Worker MQTT para monitoreo de cadena de frio ColdGuard IoT",
+    "type": "project",
+    "require": {
+        "php": "^8.2",
+        "php-mqtt/client": "^2.1",
+        "mongodb/mongodb": "^2.0",
+        "phpmailer/phpmailer": "^6.9"
+    },
+    "autoload": {
+        "psr-4": {
+            "ColdGuard\\": "src/"
+        }
+    }
+}

@@ -1,0 +1,80 @@
+services:
+  web:
+    build: .
+    container_name: coldguard_web
+    ports:
+      - "8080:80"
+    volumes:
+      - .:/var/www/html
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - MONGO_URI=mongodb://mongodb:27017
+      - MYSQL_HOST=mysql
+      - MYSQL_DB=coldguard
+      - MYSQL_USER=coldguard_user
+      - MYSQL_PASS=coldguard_pass
+    depends_on:
+      - mongodb
+      - mysql
+      - mosquitto
+    restart: unless-stopped
+
+  worker:
+    build: .
+    container_name: coldguard_mqtt_worker
+    command: php /var/www/html/mqtt_worker.php
+    volumes:
+      - .:/var/www/html
+    environment:
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - MONGO_URI=mongodb://mongodb:27017
+      - MYSQL_HOST=mysql
+      - MYSQL_DB=coldguard
+      - MYSQL_USER=coldguard_user
+      - MYSQL_PASS=coldguard_pass
+    depends_on:
+      - mosquitto
+      - mongodb
+      - mysql
+    restart: always
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: coldguard_mosquitto
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7
+    container_name: coldguard_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: coldguard_mysql
+    environment:
+      MYSQL_DATABASE: coldguard
+      MYSQL_USER: coldguard_user
+      MYSQL_PASSWORD: coldguard_pass
+      MYSQL_ROOT_PASSWORD: root_secret_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  mysql_data:
