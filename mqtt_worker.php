@@ -1,16 +1,23 @@
 <?php
+/**
+ * Worker MQTT - CoolGuard IoT Cloud
+ * Este script corre en segundo plano dentro de un contenedor Docker, se conecta
+ * al broker MQTT para escuchar las telemetrías del ESP32-S3 y las guarda en MySQL.
+ */
+
+// 1. Cargar el autoloader de Composer para importar las librerías externas (como php-mqtt/client)
 require __DIR__ . '/vendor/autoload.php';
 
 use PhpMqtt\Client\MqttClient;
 use PhpMqtt\Client\ConnectionSettings;
 
-// Usamos las variables de entorno definidas en el docker-compose.yml
-$server   = getenv('MQTT_HOST') ?: 'mosquitto';
-$port     = intval(getenv('MQTT_PORT') ?: 1883);
-$clientId = 'coolguard_php_worker_' . uniqid();
-$topic    = 'sensor/dht11';
+// 2. Configuración de conexión MQTT utilizando variables de entorno de Docker
+$server   = getenv('MQTT_HOST') ?: 'mosquitto'; // Nombre del servicio Mosquitto en Docker Compose
+$port     = intval(getenv('MQTT_PORT') ?: 1883); // Puerto estándar MQTT
+$clientId = 'coolguard_php_worker_' . uniqid(); // ID único para evitar conflictos en el broker
+$topic    = 'sensor/dht11';                     // Tópico donde el ESP32 publica los datos
 
-// Conexión a MySQL usando el servicio definido en Docker
+// 3. Configuración de conexión a la base de datos MySQL (definidas en Docker Compose)
 $db_host = getenv('MYSQL_HOST') ?: 'mysql';
 $db_name = getenv('MYSQL_DB')   ?: 'coldguard';
 $db_user = getenv('MYSQL_USER') ?: 'coldguard_user';
@@ -19,7 +26,11 @@ $db_pass = getenv('MYSQL_PASS') ?: 'coldguard_pass';
 echo "[INIT] Conectando a MySQL en {$db_host}...\n";
 $pdo = null;
 
-// Reintentar conexión si MySQL tarda unos segundos más en arrancar al iniciar Docker
+/**
+ * 4. Bucle de reintento para la conexión a MySQL
+ * Al iniciar Docker, MySQL tarda unos segundos en levantar su motor interno.
+ * Este bucle evita que el script falle por completo si la base de datos aún no está lista.
+ */
 while (!$pdo) {
     try {
         $pdo = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8mb4", $db_user, $db_pass, [
@@ -32,7 +43,11 @@ while (!$pdo) {
     }
 }
 
-// Crear tablas automáticamente si no existen
+/**
+ * 5. Inicialización automática de la estructura de tablas
+ * Si las tablas 'devices' y 'telemetry' no existen en la base de datos, 
+ * el script las crea de forma automática para garantizar la integridad referencial.
+ */
 $pdo->exec("
     CREATE TABLE IF NOT EXISTS devices (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -53,41 +68,52 @@ $pdo->exec("
     );
 ");
 
-// Configuración y conexión MQTT
+// 6. Instanciación del cliente MQTT y configuración de parámetros avanzados
 $client = new MqttClient($server, $port, $clientId);
 $connectionSettings = (new ConnectionSettings())
-    ->setKeepAliveInterval(60)
-    ->setReconnectAutomatically(true);
+    ->setKeepAliveInterval(60)              // Intervalo de latencia (ping) para mantener la sesión viva
+    ->setReconnectAutomatically(true);       // Habilita la reconexión automática ante cortes de red
 
 try {
-    $client->connect($connectionSettings, true);
+    /**
+     * IMPORTANTE: Al activar 'setReconnectAutomatically(true)', el segundo parámetro 
+     * de connect() (clean session) DEBE ser 'false' para evitar conflictos en la librería.
+     */
+    $client->connect($connectionSettings, false);
     echo "[MQTT] Conectado exitosamente al broker en {$server}:{$port}\n";
     echo "[MQTT] Escuchando el tópico: '{$topic}'...\n";
 
-    // Suscripción al tópico que envía tu ESP32-S3
+    /**
+     * 7. Suscripción al canal de telemetría del ESP32-S3
+     * Cada vez que el ESP32 envíe un mensaje a 'sensor/dht11', se ejecutará esta función anónima.
+     */
     $client->subscribe($topic, function (string $topic, string $message) use ($pdo) {
         echo "\n[MQTT EVENTO] Mensaje recibido en [{$topic}]: {$message}\n";
 
+        // Decodificar el JSON enviado por el microcontrolador
         $data = json_decode($message, true);
 
+        // Validar que el paquete contenga los campos mínimos necesarios
         if (!$data || !isset($data['temperature']) || !isset($data['humidity'])) {
             echo "[WARN] El payload no tiene el formato JSON esperado.\n";
             return;
         }
 
+        // Extraer y castear los valores del sensor
         $temperature = floatval($data['temperature']);
         $humidity    = floatval($data['humidity']);
         $uptime      = isset($data['time_uptime_s']) ? intval($data['time_uptime_s']) : 0;
         $isBuffered  = isset($data['buffered']) && $data['buffered'] === true ? 1 : 0;
-        $device_uid  = $topic; 
+        $device_uid  = $topic; // Usamos el tópico como identificador lógico del dispositivo
 
         try {
-            // Registrar o buscar el dispositivo
+            // 8. Verificar si el dispositivo ya está registrado en la base de datos
             $stmt = $pdo->prepare("SELECT id FROM devices WHERE device_uid = ?");
             $stmt->execute([$device_uid]);
             $device = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$device) {
+                // Si no existe, lo registramos automáticamente
                 $stmtInsertDev = $pdo->prepare("INSERT INTO devices (device_uid, location_name) VALUES (?, ?)");
                 $stmtInsertDev->execute([$device_uid, 'ESP32-S3 CoolGuard']);
                 $deviceId = $pdo->lastInsertId();
@@ -95,7 +121,7 @@ try {
                 $deviceId = $device['id'];
             }
 
-            // Insertar telemetría
+            // 9. Insertar el registro de telemetría en la tabla correspondiente
             $sql = "INSERT INTO telemetry (device_id, temperature, humidity, device_uptime_s, is_buffered, inserted_at) 
                     VALUES (?, ?, ?, ?, ?, NOW())";
             $stmtInsertTel = $pdo->prepare($sql);
@@ -107,9 +133,9 @@ try {
             echo "[ERROR DB] " . $e->getMessage() . "\n";
         }
 
-    }, 0);
+    }, 0); // QoS 0 para entrega rápida
 
-    // Mantener el loop abierto escuchando permanentemente
+    // 10. Mantener el proceso en ejecución continua escuchando los mensajes entrantes
     $client->loop(true);
 
 } catch (Exception $e) {

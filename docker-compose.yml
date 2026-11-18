@@ -28,9 +28,10 @@ services:
     command: php /var/www/html/mqtt_worker.php
     volumes:
       - .:/var/www/html
+
     environment:
-      - MQTT_HOST=mosquitto
-      - MQTT_PORT=1883
+      - MQTT_HOST=192.168.0.103
+      - MQTT_PORT=1883  
       - MONGO_URI=mongodb://mongodb:27017
       - MYSQL_HOST=mysql
       - MYSQL_DB=coldguard
