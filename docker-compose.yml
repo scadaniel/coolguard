@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   web:
     build: .
@@ -70,7 +72,7 @@ services:
       MYSQL_PASSWORD: coldguard_pass
       MYSQL_ROOT_PASSWORD: root_secret_password
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     restart: unless-stopped
