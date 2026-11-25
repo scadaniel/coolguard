@@ -5,6 +5,9 @@
  * al broker MQTT para escuchar las telemetrías del ESP32-S3 y las guarda en MySQL.
  */
 
+// Configurar zona horaria local (Argentina UTC-3)
+date_default_timezone_set('America/Argentina/Buenos_Aires');
+
 // 1. Cargar el autoloader de Composer para importar las librerías externas (como php-mqtt/client)
 require __DIR__ . '/vendor/autoload.php';
 
@@ -36,7 +39,9 @@ while (!$pdo) {
         $pdo = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8mb4", $db_user, $db_pass, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
         ]);
-        echo "[PHP-DB] ¡Conectado exitosamente a MySQL!\n";
+        // Fijar zona horaria de la sesión MySQL a UTC-3
+        $pdo->exec("SET time_zone = '-03:00'");
+        echo "[PHP-DB] ¡Conectado exitosamente a MySQL (UTC-3)!\n";
     } catch (PDOException $e) {
         echo "[DB WAIT] Esperando a que MySQL esté listo...\n";
         sleep(3);
@@ -121,13 +126,17 @@ try {
                 $deviceId = $device['id'];
             }
 
+            // Obtener la hora local exacta de Argentina (UTC-3)
+            $insertedAt = (new DateTimeImmutable('now', new DateTimeZone('America/Argentina/Buenos_Aires')))
+                ->format('Y-m-d H:i:s');
+
             // 9. Insertar el registro de telemetría en la tabla correspondiente
             $sql = "INSERT INTO telemetry (device_id, temperature, humidity, device_uptime_s, is_buffered, inserted_at) 
-                    VALUES (?, ?, ?, ?, ?, NOW())";
+                    VALUES (?, ?, ?, ?, ?, ?)";
             $stmtInsertTel = $pdo->prepare($sql);
-            $stmtInsertTel->execute([$deviceId, $temperature, $humidity, $uptime, $isBuffered]);
+            $stmtInsertTel->execute([$deviceId, $temperature, $humidity, $uptime, $isBuffered, $insertedAt]);
 
-            echo "[DB OK] Guardado -> Temp: {$temperature}°C | Hum: {$humidity}% | Uptime: {$uptime}s | Buffer: {$isBuffered}\n";
+            echo "[DB OK] [{$insertedAt}] Guardado -> Temp: {$temperature}°C | Hum: {$humidity}% | Uptime: {$uptime}s | Buffer: {$isBuffered}\n";
 
         } catch (PDOException $e) {
             echo "[ERROR DB] " . $e->getMessage() . "\n";

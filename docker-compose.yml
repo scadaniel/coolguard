@@ -30,7 +30,7 @@ services:
       - .:/var/www/html
 
     environment:
-      - MQTT_HOST=192.168.0.103
+      - MQTT_HOST=192.168.0.105
       - MQTT_PORT=1883  
       - MONGO_URI=mongodb://mongodb:27017
       - MYSQL_HOST=mysql
